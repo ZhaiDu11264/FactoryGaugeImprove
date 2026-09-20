@@ -19,18 +19,15 @@ Vanilla clamps one input connection to 1–64, and **a cell *is* the connection*
 ingots means nine identical gauges on the wall, and a production line can never be tuned to a batch.
 
 This mod keeps **one cell = one stack** and spills anything above that into the following empty
-cells, so a cell never holds a number larger than a stack:
+cells, so a cell never holds a number larger than a stack.
 
-```text
-100 items                    576 items
-┌────┬────┬────┐             ┌────┬────┬────┐
-│ 64 │ 36 │    │             │ 64 │ 64 │ 64 │
-├────┼────┼────┤             ├────┼────┼────┤
-│    │    │    │             │ 64 │ 64 │ 64 │
-├────┼────┼────┤             ├────┼────┼────┤
-│    │    │    │             │ 64 │ 64 │ 64 │
-└────┴────┴────┘             └────┴────┴────┘
-```
+100 items — the surplus spills into the next cell:
+
+![100 items: 64 + 36](screenshots/100-items.png)
+
+576 items — nine full cells, one whole package:
+
+![576 items: nine cells of 64](screenshots/576-items.png)
 
 | | Vanilla | This mod |
 |---|---|---|
@@ -42,6 +39,8 @@ cells, so a cell never holds a number larger than a stack:
 
 Since a Create package holds 9 × 64, a gauge can no longer describe an order that a single package
 cannot carry — which is what used to force nine gauges onto one wall.
+
+![Factory gauge in the world, connected to a chain conveyor](screenshots/in-game.png)
 
 ## Using it
 
