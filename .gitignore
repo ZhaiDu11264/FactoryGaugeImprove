@@ -20,3 +20,6 @@ libs/*.jar
 
 # Maintainer notes (local only, not published)
 docs/
+
+# id of the Modrinth project this repo publishes to
+.modrinth_project_id
