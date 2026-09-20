@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+run/
+
+# local logs and verification reports
+*.log
+*_log.txt
+mutate_verify.txt
+
+# Create, Flywheel and Ponder are compileOnly dependencies and are not
+# redistributed here - drop the three jars into libs/ to build (see README).
+libs/*.jar
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.settings/
+
+# Maintainer notes (local only, not published)
+docs/

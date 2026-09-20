@@ -1,0 +1,50 @@
+modLoader = "javafml" #mandatory
+loaderVersion = "${loader_range}" #mandatory
+license = "MIT"
+authors = "ZhaiDu11264"
+
+[[mods]] #mandatory
+modId = "factorygaugeimprove" #mandatory
+version = "${mod_version}" #mandatory
+displayName = "Factory Gauge Improve" #mandatory
+logoFile = "factorygaugeimprove.png"
+# Client-side quality of life patch: the vanilla server accepts the larger
+# amounts, so mismatched servers/clients are fine.
+displayTest = "IGNORE_SERVER_VERSION"
+description = '''
+Raises both amount ceilings of Create's factory gauges: an input arrow carries
+up to 576 items - nine cells of one stack, exactly one full package - and a
+single request may ask for up to 46656 product.
+
+Amounts past a stack spill into the following empty cells instead of pushing one
+cell past 64, and Shift/Ctrl scrolling steps in eighths or whole stacks so exact
+numbers stay reachable. No more nine identical gauges on one wall just to say
+"nine stacks".
+
+Client-side only; every limit is configurable in
+config/factorygaugeimprove-client.toml.
+'''
+
+[[mixins]]
+config = "factorygaugeimprove.mixins.json"
+
+[[dependencies.factorygaugeimprove]]
+modId = "neoforge"
+type = "required"
+versionRange = "${neoforge_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.factorygaugeimprove]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_range}"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.factorygaugeimprove]]
+modId = "create"
+type = "required"
+versionRange = "[6.0.0,)"
+ordering = "AFTER"
+side = "BOTH"

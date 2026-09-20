@@ -1,0 +1,130 @@
+/*
+ * Factory Gauge Improve - lifts the per-connection amount ceiling of Create's
+ * factory gauges (1 stack) so a single input arrow can carry a whole package,
+ * and adds stepped scrolling so large amounts are reachable exactly.
+ *
+ * Client-side only: it patches the factory gauge configuration screen.
+ * NeoForge 1.21.1, built with ModDevGradle.
+ */
+
+plugins {
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+base {
+    archivesName = "factorygaugeimprove"
+    group = 'ho.artisan.factorygaugeimprove'
+    version = "${mod_version}-for-create-${create_version}-neoforge-${minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+repositories {
+    // China mirrors first for faster dependency downloads
+    maven { url = 'https://maven.aliyun.com/repository/public' }
+    maven { url = 'https://maven.aliyun.com/repository/central' }
+    mavenCentral()
+    maven { url = 'https://maven.neoforged.net/releases' }
+}
+
+neoForge {
+    version = neoforge_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft
+        mappingsVersion = parchment_version
+    }
+
+    mods {
+        factorygaugeimprove {
+            sourceSet sourceSets.main
+        }
+    }
+
+    runs {
+        configureEach {
+            gameDirectory = project.file('run')
+            logLevel = org.slf4j.event.Level.INFO
+        }
+
+        client {
+            client()
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+        }
+    }
+}
+
+dependencies {
+    // Create provides FactoryPanelScreen, the class this mod patches.
+    // catnip (net.createmod.catnip) ships inside the ponder jar, flywheel is
+    // needed to resolve the block entity class hierarchy.
+    // All three stay compileOnly; Create itself brings them at runtime.
+    compileOnly files('libs/create-1.21.1-6.0.10.jar')
+    compileOnly files('libs/ponder-neoforge-1.0.82+mc1.21.1.jar')
+    compileOnly files('libs/flywheel-neoforge-1.21.1-1.0.6.jar')
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            version          : version,
+            mod_version      : mod_version,
+            minecraft_version: minecraft_version,
+            minecraft_range  : minecraft_range,
+            loader_range     : loader_range,
+            neoforge_range   : neoforge_range
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/neoforge.mods.toml']) {
+        expand replaceProperties
+    }
+}
+
+jar {
+    from('LICENSE') {
+        rename { "${it}_${archivesBaseName}" }
+    }
+    manifest {
+        attributes([
+                "Specification-Title"     : "factorygaugeimprove",
+                "Specification-Vendor"    : "ZhaiDu11264",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "ZhaiDu11264",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// The game cannot be launched from this dev environment (Create is compileOnly),
+// so the amount arithmetic is exercised by a plain-JVM harness instead.
+def toolsClasses = layout.buildDirectory.dir('tools-classes')
+def java21Compiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(21) }
+def java21Launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+
+tasks.register('compileAmountCheck', JavaCompile) {
+    dependsOn 'compileJava'
+    source = fileTree('tools') { include '*.java' }
+    classpath = files(sourceSets.main.output.classesDirs)
+    destinationDirectory = toolsClasses
+    javaCompiler = java21Compiler
+    options.encoding = 'UTF-8'
+}
+
+tasks.register('checkAmounts', JavaExec) {
+    dependsOn 'compileAmountCheck'
+    classpath = files(toolsClasses, sourceSets.main.output.classesDirs)
+    mainClass = 'AmountSteppingCheck'
+    javaLauncher = java21Launcher
+}
