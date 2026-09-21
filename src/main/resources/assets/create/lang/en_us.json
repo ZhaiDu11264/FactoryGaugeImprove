@@ -1,5 +1,5 @@
 {
   "create.factory_panel.fgi_grid_full": "The input grid is full: a gauge occupies at most 9 cells (one package)",
-  "create.factory_panel.fgi_no_free_cell": "No free cell left: lower one of the input amounts first",
+  "create.factory_panel.fgi_no_free_cell": "No free cell left: lower one of this gauge's input amounts first",
   "create.factory_panel.fgi_grid_overflow": "An input exceeds the 9 cell capacity and is not shown: lower its amount"
 }

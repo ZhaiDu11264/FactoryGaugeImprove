@@ -40,6 +40,10 @@ cells, so a cell never holds a number larger than a stack.
 Since a Create package holds 9 × 64, a gauge can no longer describe an order that a single package
 cannot carry — which is what used to force nine gauges onto one wall.
 
+The limit counts **cells in the grid you are filling**, not arrows leaving a gauge: a gauge that
+feeds nine downstream inputs is not blocked by that, and being pointed at by other gauges never
+costs a gauge a cell of its own.
+
 ![Factory gauge in the world, connected to a chain conveyor](screenshots/in-game.png)
 
 ## Using it
@@ -62,7 +66,7 @@ close with a big step, fine-tune with ±1.
 ## Installing
 
 1. Install **NeoForge 21.1.x** and **Create 6.0.10** (Fabric is not supported).
-2. Drop `factorygaugeimprove-1.2.0-for-create-6.0.10-neoforge-1.21.1.jar` into `.minecraft/mods`.
+2. Drop `factorygaugeimprove-1.2.1-for-create-6.0.10-neoforge-1.21.1.jar` into `.minecraft/mods`.
 3. Single-player works immediately; on a server only **your own client** needs the mod.
 
 ## Configuration
@@ -92,7 +96,7 @@ close with a big step, fine-tune with ±1.
 
 | Message | Meaning |
 |---|---|
-| No free cell: lower the amount of an input, then connect | all nine cells are taken; the tenth connection is refused |
+| No free cell: lower one of this gauge's input amounts first | that panel's grid is already spending all nine cells; the new connection is refused |
 | Input grid is full: a gauge holds at most 9 cells (one package) | you kept scrolling up at the ceiling |
 | An input needs more than 9 cells; the rest cannot be shown: lower it | the existing input needs more cells than are available (`maxCells` was lowered, or the amount predates it) |
 
@@ -106,7 +110,8 @@ close with a big step, fine-tune with ±1.
   fails loudly at load time instead of silently falling back to a 64 ceiling.
 * Next to other mods that patch the gauge screen, the immediate refresh can be lost, but the
   fallback layout on scroll always runs.
-* Not done on purpose: a tenth input connection, or the same inventory connected twice.
+* Not done on purpose: a tenth input connection per grid, or the same source connected twice to one
+  gauge (Create keys connections by source, and requests are merged per item anyway).
 
 ## Building
 

@@ -33,6 +33,7 @@ SCREEN = "com/simibubi/create/content/logistics/factoryBoard/FactoryPanelScreen.
 HANDLER = "com/simibubi/create/content/logistics/factoryBoard/FactoryPanelConnectionHandler.class"
 BEHAVIOUR = "com/simibubi/create/content/logistics/factoryBoard/FactoryPanelBehaviour.class"
 CONNECTION = "com/simibubi/create/content/logistics/factoryBoard/FactoryPanelConnection.class"
+PACKET = "com/simibubi/create/content/logistics/factoryBoard/FactoryPanelConnectionPacket.class"
 BIG_ITEM_STACK = "com/simibubi/create/content/logistics/BigItemStack.class"
 
 AMOUNT_FIELD = "Field com/simibubi/create/content/logistics/BigItemStack.count:I"
@@ -201,11 +202,32 @@ class ClassFile:
             match = re.match(r"^(.*?) ([\w$<>]+)\(([^)]*)\)$", key)
             if not match or match.group(2) != name:
                 continue
-            args = [a for a in match.group(3).split(",") if a.strip()]
-            if arg_count is not None and len(args) != arg_count:
+            if arg_count is not None and self._arg_count(match.group(3)) != arg_count:
                 continue
             return body
         return None
+
+    @staticmethod
+    def _arg_count(params: str) -> int:
+        """Parameters split on top-level commas only.
+
+        A generic parameter carries its own commas - ``java.util.Map<?, ?>`` is
+        one argument, not two - so a plain ``split(",")`` reports the wrong
+        count and the method silently fails to resolve. Angle brackets are
+        tracked, with ``? extends``/``? super`` wildcards staying inside them.
+        """
+        if not params.strip():
+            return 0
+        depth = 0
+        count = 1
+        for char in params:
+            if char == "<":
+                depth += 1
+            elif char == ">":
+                depth -= 1
+            elif char == "," and depth == 0:
+                count += 1
+        return count
 
     def keys(self, name: str) -> list[str]:
         return [key for key in self.methods
@@ -273,6 +295,35 @@ def main() -> int:
           len(guards) == 1, f"found {len(guards)}")
     check("checkForIssues is the String-returning overload",
           any(key.startswith("java.lang.String ") for key in guards))
+
+    # Which argument of checkForIssues owns the grid the new arrow lands in.
+    # panelClicked calls checkForIssues(from = connectingFrom, to = clicked), and
+    # on the server FactoryPanelConnectionPacket.applySettings resolves the
+    # packet's toPos - the clicked panel, i.e. the *second* argument - and calls
+    # addConnection on it. So the receiver is argument 1 and its targetedBy is
+    # the arrow set shown in its own grid. Asserted from bytecode rather than
+    # trusted, because the mod's own hook counts cells on exactly that map and
+    # getting the argument wrong silently guards the wrong gauge.
+    if guards:
+        guard_body = handler.method("checkForIssues", 2) or []
+        dup = next((i for i, line in enumerate(guard_body)
+                    if "targetedBy" in line and "getfield" in line), -1)
+        check("checkForIssues reads targetedBy off its first argument",
+              dup >= 0 and ClassFile.window(guard_body, dup, 2).strip().endswith("aload_0"),
+              ClassFile.window(guard_body, dup, 2)[-40:] or "no targetedBy read")
+
+    # The receiving side is the second argument, proven at the call site: the
+    # packet is built with the clicked panel's position first and connectingFrom
+    # second, and the server hands that packet's toPos to addConnection.
+    packet = ClassFile(PACKET)
+    apply_settings = packet.method("applySettings", 2) or []
+    check("the connection packet stores the clicked panel as toPos",
+          "putfield" in ClassFile.window(apply_settings, 8)
+          or any("toPos" in line for line in apply_settings[:12]),
+          "toPos is not the first position the packet is constructed with")
+    check("and the server adds the connection to that panel",
+          any("addConnection" in line for line in apply_settings),
+          "applySettings no longer calls addConnection")
 
     behaviour = ClassFile(BEHAVIOUR)
     check("FactoryPanelBehaviour.targetedBy stays readable", "targetedBy" in behaviour.fields,
@@ -383,6 +434,60 @@ def main() -> int:
     check("the built-in request ceiling is 46656",
           re.search(r"//\s*int 46656\b", config.text) is not None,
           "the default has to be a real int constant, not only a config comment")
+
+    # ---- the connection guard counts the right gauge's cells --------------
+    # The hook decides whether an arrow may be laid by counting the cells the
+    # receiving gauge's grid already spends. Both halves of that sentence are
+    # checked against the compiled mixin, because each can be wrong in a way
+    # that still loads and still compiles:
+    #   * counting `from` instead of `to` guards the wrong gauge, so a grid that
+    #     is genuinely full accepts another arrow while an unrelated gauge is
+    #     refused - which is exactly the mix-up this contract exists to prevent;
+    #   * counting arrows instead of cells lets four connections of 200 items
+    #     each pass as "four of nine" while describing an order no package can
+    #     carry, which is the vanilla behaviour the mod removes.
+    guard = ClassFile(text=mod_class(*MIXIN_PACKAGE.split("/"), "FactoryPanelConnectionHandlerMixin.class"))
+    verbose_handler = mixin_source("FactoryPanelConnectionHandlerMixin")
+    # Three arguments: from, to, and the CallbackInfoReturnable. Passing an
+    # argument count matters here - the mod has a second handler method that
+    # also starts with "factorygaugeimprove$", and Method matching by name alone
+    # can land on the wrong one.
+    guard_body = guard.method("factorygaugeimprove$checkInCells", 3) or []
+    if check("the connection guard hook is built", bool(guard_body), "run gradlew.bat build first"):
+        # Two reads are legitimate and both matter: one for the duplicate check
+        # (vanilla's own test, on the receiving gauge) and one for the cell sum.
+        reads = [i for i, line in enumerate(guard_body)
+                 if line.startswith("getfield") and "targetedBy" in line]
+        check("the guard reads a targetedBy map for each of its two tests",
+              len(reads) == 2, f"found {len(reads)}")
+        owners = [ClassFile.window(guard_body, i, 1).strip()[-7:] for i in reads]
+        check("both reads are the receiving gauge's (aload_1), never the source's",
+              owners == ["aload_1", "aload_1"], str(owners))
+        check("the guard measures cells, not arrows",
+              "AmountStepping.cells" in " ".join(guard_body),
+              "counting connections instead of cells restores vanilla's blind spot")
+        check("and it refuses through fitsGrid",
+              "fitsGrid" in " ".join(guard_body), "the cell budget has to be the thing tested")
+        check("the guard keeps vanilla's duplicate-source rejection verbatim",
+              "factory_panel.already_connected" in " ".join(guard_body),
+              "dropping it lets one source be connected twice")
+
+    # Vanilla's own cap is an arrow count aimed at the source; re-aiming it at
+    # the grid is what stops a gauge being refused because of arrows it did not
+    # draw. The redirect handler is named and counted exactly, because a
+    # `method("...")` lookup by name alone would match the hook above and report
+    # a passing check on a redirect that is not there.
+    size_hook = guard.method("factorygaugeimprove$countAgainstTheGrid", 1) or []
+    check("vanilla's Map.size() ceiling is redirected, not left counting arrows",
+          bool(size_hook), "checkForIssues would keep capping arrows leaving a source")
+    check("and the redirect answers with the grid's capacity",
+          "FactoryGaugeImprove.maxCells" in " ".join(size_hook),
+          "the redirected count has to be a cell budget")
+    redirects_on_size = [a for a in redirects(verbose_handler)
+                         if unwrap(a["target"]) == MAP_SIZE_DESC]
+    check("and it is anchored on checkForIssues' own Map.size()",
+          len(redirects_on_size) == 1 and "checkForIssues" in unwrap(redirects_on_size[0]["method"]),
+          f"found {len(redirects_on_size)} redirects on Map.size()")
 
     # ---- report ----------------------------------------------------------
     failed = 0
