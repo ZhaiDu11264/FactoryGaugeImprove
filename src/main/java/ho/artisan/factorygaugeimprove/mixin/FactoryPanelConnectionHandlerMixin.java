@@ -5,65 +5,79 @@ import com.simibubi.create.content.logistics.factoryBoard.FactoryPanelConnection
 import com.simibubi.create.content.logistics.factoryBoard.FactoryPanelConnectionHandler;
 import ho.artisan.factorygaugeimprove.AmountStepping;
 import ho.artisan.factorygaugeimprove.FactoryGaugeImprove;
-import java.util.Map;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Keeps vanilla's "at most nine arrows" rule exactly as wide as the grid behind
- * it, and no wider.
+ * Re-expresses vanilla's input-grid ceiling in cells instead of arrows.
  *
  * <h2>Which side is which</h2>
  *
- * {@code checkForIssues(FactoryPanelBehaviour from, FactoryPanelBehaviour to)}
- * is the vanilla guard that decides whether a new arrow may be laid. Both names
- * are taken from the call site in {@code panelClicked}:
+ * <p>{@code checkForIssues(FactoryPanelBehaviour from, FactoryPanelBehaviour to)}
+ * is the vanilla guard that decides whether a new connection may be laid. Both
+ * names come from its only caller, {@code panelClicked}:
  *
  * <pre>{@code
- * FactoryPanelBehaviour from = FactoryPanelBehaviour.at(level, connectingFrom);
- * String issue = checkForIssues(from, panel);          // panel == the one clicked
- * new FactoryPanelConnectionPacket(panel.getPanelPosition(), connectingFrom, false);
+ * FactoryPanelBehaviour at = FactoryPanelBehaviour.at(level, connectingFrom);
+ * String issue = checkForIssues(at, panel);   // panel == the gauge under the cursor
  * }</pre>
  *
  * <p>{@code from} is the gauge the player clicked <em>first</em>, {@code to} the
- * one under the cursor. {@code to} is the side that stores the arrow - on the
- * server, {@code FactoryPanelConnectionPacket.applySettings} calls
- * {@code to.addConnection(from.getPanelPosition())} - and every vanilla test
- * inside {@code checkForIssues} is written against {@code from}:
- * {@code from.targetedBy.containsKey(to.getPanelPosition())} for
- * {@code already_connected} and {@code from.targetedBy.size() >= 9} for
- * {@code cannot_add_more_inputs}.
+ * second one. That is the whole story for this method, and it is worth spelling
+ * out because the network packet names the same two gauges the other way round:
+ * {@code panelClicked} sends
+ * {@code new FactoryPanelConnectionPacket(panel.getPanelPosition(), connectingFrom, false)},
+ * whose constructor is {@code (fromPos, toPos, relocate)} - so the packet's
+ * {@code toPos} is this method's {@code from}, and its {@code fromPos} is this
+ * method's {@code to}.
  *
- * <h2>Which side is a gauge's own grid</h2>
+ * <p>The server side then lands on the first-clicked gauge:
+ * {@code applySettings} looks up {@code toPos} and calls
+ * {@code behaviour.addConnection(fromPos)}. So it is {@code from} that receives
+ * the connection, {@code from} that stores it, and {@code from.targetedBy} that
+ * is the first-clicked gauge's own set of inputs. Every vanilla test in this
+ * method is read off {@code from} for exactly that reason, and none of them
+ * should be moved to {@code to} - doing so would let one gauge's input count
+ * refuse a connection into a different, empty gauge.
  *
- * {@code targetedBy} is keyed by {@code FactoryPanelConnection.from} - the
- * source of each arrow, see {@code FactoryPanelBehaviour.at(level, connection)}
- * and {@code addConnection}, which puts a connection keyed on the position it
- * was given. So {@code from.targetedBy} is the set of gauges {@code from}
- * <em>draws from</em>: the arrows leaving it, i.e. one entry per connection that
- * gauge has fed. That is the count vanilla caps at nine, and it is <em>not</em>
- * the gauge's own input grid.
+ * <h2>What {@code targetedBy} holds</h2>
  *
- * <p>A gauge's own 3x3 grid lives on whichever gauge the player installed the
- * connection into, and each cell is one {@code FactoryPanelConnection.amount} of
- * a connection keyed by its source. It is therefore exactly the {@code to} of
- * this method, and the cells it contains are what the rest of this mod lays out
- * and scrolls. Being pointed at is not a grid and must not cost a cell: an input
- * keeps the cells it owns, and a connection is never refused because of arrows
- * somebody else drew.
+ * <p>{@code addConnection(fromPos)} does
+ * {@code this.targetedBy.put(fromPos, new FactoryPanelConnection(fromPos, 1))},
+ * so the map is keyed by the <em>source</em> of each connection - the gauge the
+ * arrow comes from - and valued by that connection's amount. It is the receiving
+ * gauge's list of inputs, and it is the grid the player sees in the panel's 3x3
+ * area:
+ *
+ * <ul>
+ * <li>{@code from.targetedBy} - the inputs of the first-clicked gauge. This is
+ *     the grid being filled by the connection under test.</li>
+ * <li>{@code from.targeting} - the gauges it feeds, updated on the same line
+ *     ({@code source.targeting.add(...)}, where {@code source} is
+ *     {@code at(fromPos)}). Feeding others is not limited here in any way.</li>
+ * </ul>
  *
  * <h2>What this mod changes</h2>
  *
- * Nothing about the number nine: nine arrows fed by one gauge is nine cells of
- * its counterpart's grid, which is one package, which is the invariant the whole
- * mod exists to keep. What changes is the <em>unit</em>. Vanilla assumed one
- * arrow is one cell, so it counted arrows; here an arrow may carry several
- * stacks and own several cells, so the cap is measured in cells. Both tests are
- * re-expressed that way, against the grid that is actually being filled -
- * {@code to}'s - because that is the grid the player is looking at.
+ * <p>Only the unit. Vanilla counts one arrow per input and refuses the tenth,
+ * which is right while one input carries one stack. Here an input may carry
+ * several stacks ({@link AmountStepping#cells}), so the same rule is expressed
+ * in the cells those amounts actually occupy: the grid holds
+ * {@code maxCells} cells, and a new connection is refused when the inputs
+ * already claim all of them. At one stack per input the two formulations agree,
+ * so nine inputs remain nine inputs; what changes is that one input carrying a
+ * whole package is now seen as the full grid it is.
+ *
+ * <p>Nothing is capped in the other direction: how many gauges a gauge feeds
+ * ({@code from.targeting}) is not consulted, and being connected by somebody
+ * else never takes a cell away from a gauge's own inputs.
+ *
+ * <p>Vanilla's own {@code Map.size() >= 9} test is left in place and only runs
+ * when this hook steps aside (see {@link FactoryGaugeImprove#spill()}), where
+ * one connection per cell is the rule anyway and an arrow count is the right
+ * measure of it.
  */
 @Mixin(value = FactoryPanelConnectionHandler.class, remap = false)
 public class FactoryPanelConnectionHandlerMixin {
@@ -74,25 +88,26 @@ public class FactoryPanelConnectionHandlerMixin {
 			+ ")Ljava/lang/String;";
 
 	/**
-	 * Re-expresses vanilla's two {@code targetedBy} tests in cells, against the
-	 * gauge whose grid the new arrow would occupy.
+	 * Refuses a new connection when the receiving gauge's own grid has no cell
+	 * left for it.
 	 *
-	 * <p>{@code to} is the receiving gauge, so {@code to.targetedBy} is the set
-	 * of arrows pointing at it: the inputs shown in its 3x3 grid. Counting each
-	 * one's cells is the honest version of "does this grid still have room", and
-	 * the hook keeps vanilla's {@code already_connected} verbatim - the incoming
-	 * source must not already be present, which is what stops the same source
-	 * from being connected twice, and what leaves the grid's width for other
-	 * sources untouched.
+	 * <p>{@code from} is the gauge that will hold the connection (see the class
+	 * notes), so its {@code targetedBy} is the set of inputs already shown in its
+	 * grid. Each of those claims {@code cells(amount, perCell)} cells, and
+	 * {@link AmountStepping#fitsGrid} answers whether one more cell is still
+	 * free.
 	 *
-	 * <p>{@code cancel} because vanilla's own versions of both are wrong here:
-	 * its {@code size() >= 9} counts arrows where cells is the unit, so a grid
-	 * holding 4 connections of 200 items each would still look half empty while
-	 * describing an order no package could carry.
+	 * <p>The duplicate test comes first and is vanilla's own, unchanged in
+	 * meaning: a source that is already an input of this gauge must not be added
+	 * twice, or one gauge could fill the grid with repeats of itself. Note that
+	 * it reads {@code from.targetedBy} - the receiving side - for the same reason
+	 * as everything else here; checking {@code to} instead would ask whether the
+	 * <em>other</em> gauge already feeds from this one, which is a different
+	 * question and not a reason to refuse.
 	 *
-	 * <p>The refusal is returned rather than applied - nothing is changed behind
-	 * the player's back, they are told which input does not fit, and the layout
-	 * already on screen never shrinks on its own.
+	 * <p>Returning the message rather than applying anything keeps the player in
+	 * charge: nothing is written, the grid on screen keeps the shape it had, and
+	 * the refusal names the panel whose inputs are full.
 	 */
 	@Inject(method = CHECK_FOR_ISSUES, at = @At("HEAD"), cancellable = true)
 	private static void factorygaugeimprove$checkInCells(FactoryPanelBehaviour from, FactoryPanelBehaviour to,
@@ -101,55 +116,25 @@ public class FactoryPanelConnectionHandlerMixin {
 			return;
 		}
 
-		// Vanilla's own duplicate test, kept as it is: one source, one arrow.
-		if (to.targetedBy.containsKey(from.getPanelPosition())) {
+		// Vanilla's own duplicate test, kept as it is: one source, one input.
+		if (from.targetedBy.containsKey(to.getPanelPosition())) {
 			cir.setReturnValue("factory_panel.already_connected");
 			return;
 		}
 
 		int perCell = FactoryGaugeImprove.perCell();
 		int used = 0;
-		for (FactoryPanelConnection connection : to.targetedBy.values()) {
+		for (FactoryPanelConnection connection : from.targetedBy.values()) {
 			used += AmountStepping.cells(connection.amount, perCell);
 		}
 
 		if (!AmountStepping.fitsGrid(used, FactoryGaugeImprove.maxCells())) {
 			if (FactoryGaugeImprove.diagnostics()) {
 				FactoryGaugeImprove.LOGGER.info(
-						"[fgi] refusing a connection: that grid already spends {} of {} cells",
+						"[fgi] refusing a connection: that gauge's inputs already spend {} of {} cells",
 						used, FactoryGaugeImprove.maxCells());
 			}
 			cir.setReturnValue("factory_panel.fgi_no_free_cell");
 		}
-	}
-
-	/**
-	 * Vanilla's ninth-arrow ceiling, re-aimed at the side that owns the grid.
-	 *
-	 * <p>It reads {@code from.targetedBy.size()} in Create's bytecode and refuses
-	 * the tenth arrow. Left alone it would cap the number of arrows a single
-	 * gauge may feed - a real strategy limit, but the opposite of what this hook
-	 * is here for, and one the mod's own cell accounting already subsumes: the
-	 * cells a source spends are counted on the receiving grid, so a source is
-	 * bounded by the grids it feeds rather than by an arrow count of its own.
-	 *
-	 * <p>So the count is taken from {@code to} instead, where it still says
-	 * something useful: a grid with {@code maxCells} cells can only ever hold
-	 * {@code maxCells} connections, which is exactly the ceiling a
-	 * cell-accurate last-resort check needs. It cannot refuse a connection the
-	 * hook above accepted - an amount occupies at least one cell, so
-	 * {@code used < maxCells} already implies {@code to.targetedBy.size() <
-	 * maxCells}, leaving room for one more. What it catches is the case the hook
-	 * above treats as free: a malformed or hand-edited save holding more
-	 * connections than the grid has cells.
-	 *
-	 * <p>Optional on purpose. The hook above is what enforces the rule and
-	 * produces the message the player sees; losing this one changes nothing.
-	 */
-	@Redirect(method = CHECK_FOR_ISSUES, require = 0, at = @At(
-			value = "INVOKE",
-			target = "Ljava/util/Map;size()I"))
-	private static int factorygaugeimprove$countAgainstTheGrid(Map<?, ?> ignored) {
-		return FactoryGaugeImprove.maxCells();
 	}
 }

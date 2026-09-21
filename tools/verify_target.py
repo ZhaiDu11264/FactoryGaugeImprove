@@ -297,13 +297,20 @@ def main() -> int:
           any(key.startswith("java.lang.String ") for key in guards))
 
     # Which argument of checkForIssues owns the grid the new arrow lands in.
-    # panelClicked calls checkForIssues(from = connectingFrom, to = clicked), and
-    # on the server FactoryPanelConnectionPacket.applySettings resolves the
-    # packet's toPos - the clicked panel, i.e. the *second* argument - and calls
-    # addConnection on it. So the receiver is argument 1 and its targetedBy is
-    # the arrow set shown in its own grid. Asserted from bytecode rather than
-    # trusted, because the mod's own hook counts cells on exactly that map and
-    # getting the argument wrong silently guards the wrong gauge.
+    #
+    # panelClicked calls checkForIssues(at = connectingFrom, panel = clicked) -
+    # the FIRST-clicked gauge is argument 0 and the gauge under the cursor is
+    # argument 1. The packet is then built as
+    # FactoryPanelConnectionPacket(panel.getPanelPosition(), connectingFrom,
+    # false) whose constructor is (fromPos, toPos, relocate), so the packet's
+    # toPos is *this* method's argument 0 and its fromPos is argument 1. On the
+    # server, applySettings resolves that toPos and calls addConnection(fromPos)
+    # on it: the first-clicked gauge is the one that stores the connection, so
+    # argument 0's targetedBy is the grid the new input appears in.
+    #
+    # Everything below is asserted from bytecode rather than trusted, because
+    # the mod's own hook counts cells on exactly that map: reading the wrong
+    # argument silently guards a different gauge and refuses legal connections.
     if guards:
         guard_body = handler.method("checkForIssues", 2) or []
         dup = next((i for i, line in enumerate(guard_body)
@@ -312,18 +319,28 @@ def main() -> int:
               dup >= 0 and ClassFile.window(guard_body, dup, 2).strip().endswith("aload_0"),
               ClassFile.window(guard_body, dup, 2)[-40:] or "no targetedBy read")
 
-    # The receiving side is the second argument, proven at the call site: the
-    # packet is built with the clicked panel's position first and connectingFrom
-    # second, and the server hands that packet's toPos to addConnection.
+    # The receiver is argument 0, proven at the call site by following the two
+    # positions through the packet: it is constructed with the clicked panel
+    # first (fromPos) and connectingFrom second (toPos), and the server hands
+    # that toPos - argument 0's gauge - to addConnection. If the constructor
+    # argument order ever flips, this whole file's premise flips with it.
     packet = ClassFile(PACKET)
     apply_settings = packet.method("applySettings", 2) or []
-    check("the connection packet stores the clicked panel as toPos",
+    check("the connection packet stores one of the two positions as toPos",
           "putfield" in ClassFile.window(apply_settings, 8)
           or any("toPos" in line for line in apply_settings[:12]),
-          "toPos is not the first position the packet is constructed with")
-    check("and the server adds the connection to that panel",
+          "toPos is not stored by the packet constructor")
+    check("and the server adds the connection to the gauge at toPos",
           any("addConnection" in line for line in apply_settings),
           "applySettings no longer calls addConnection")
+    # applySettings must resolve the behaviour it calls addConnection on from
+    # this.toPos - not from this.fromPos. The two fields are both
+    # FactoryPanelPosition and both get loaded in this method, so the only
+    # thing worth asserting is their order: toPos has to be read first.
+    getfields = [line for line in apply_settings if "getfield" in line and "Pos" in line]
+    check("applySettings resolves the behaviour from toPos, before fromPos",
+          bool(getfields) and "toPos" in getfields[0],
+          getfields[0] if getfields else "applySettings reads no position field")
 
     behaviour = ClassFile(BEHAVIOUR)
     check("FactoryPanelBehaviour.targetedBy stays readable", "targetedBy" in behaviour.fields,
@@ -455,14 +472,27 @@ def main() -> int:
     guard_body = guard.method("factorygaugeimprove$checkInCells", 3) or []
     if check("the connection guard hook is built", bool(guard_body), "run gradlew.bat build first"):
         # Two reads are legitimate and both matter: one for the duplicate check
-        # (vanilla's own test, on the receiving gauge) and one for the cell sum.
+        # (vanilla's own test) and one for the cell sum.
         reads = [i for i, line in enumerate(guard_body)
                  if line.startswith("getfield") and "targetedBy" in line]
         check("the guard reads a targetedBy map for each of its two tests",
               len(reads) == 2, f"found {len(reads)}")
+        # Both must come off argument 0 - the FIRST-clicked gauge, which is the
+        # one the server calls addConnection on and therefore the one whose grid
+        # the new input lands in. Reading argument 1 instead would let a gauge
+        # that already has nine inputs refuse a connection into an empty one,
+        # which is the exact bug this file exists to catch.
         owners = [ClassFile.window(guard_body, i, 1).strip()[-7:] for i in reads]
-        check("both reads are the receiving gauge's (aload_1), never the source's",
-              owners == ["aload_1", "aload_1"], str(owners))
+        check("both reads are the receiving gauge's (aload_0), never the other's",
+              owners == ["aload_0", "aload_0"], str(owners))
+
+        # The map read has to be the *receiving* gauge's, so it must be a plain
+        # `aload_0 / getfield` pair - an aload_1 anywhere near these reads means
+        # the direction slipped back.
+        check("no targetedBy read is taken off argument 1",
+              not any(ClassFile.window(guard_body, i - 2, 2).strip().startswith("aload_1")
+                      for i in reads),
+              "argument 1 is the other gauge; its inputs are not the budget here")
         check("the guard measures cells, not arrows",
               "AmountStepping.cells" in " ".join(guard_body),
               "counting connections instead of cells restores vanilla's blind spot")
@@ -472,21 +502,19 @@ def main() -> int:
               "factory_panel.already_connected" in " ".join(guard_body),
               "dropping it lets one source be connected twice")
 
-    # Vanilla's own cap is an arrow count aimed at the source; re-aiming it at
-    # the grid is what stops a gauge being refused because of arrows it did not
-    # draw. The redirect handler is named and counted exactly, because a
-    # `method("...")` lookup by name alone would match the hook above and report
-    # a passing check on a redirect that is not there.
-    size_hook = guard.method("factorygaugeimprove$countAgainstTheGrid", 1) or []
-    check("vanilla's Map.size() ceiling is redirected, not left counting arrows",
-          bool(size_hook), "checkForIssues would keep capping arrows leaving a source")
-    check("and the redirect answers with the grid's capacity",
-          "FactoryGaugeImprove.maxCells" in " ".join(size_hook),
-          "the redirected count has to be a cell budget")
+    # Vanilla's own cap - from.targetedBy.size() >= 9 - reads the right map but
+    # in the wrong unit: one arrow, one cell. It is deliberately left in place
+    # rather than redirected, because the hook above already decides the answer
+    # whenever spilling is on, and when spilling is off one connection per cell
+    # *is* the rule, which makes an arrow count the honest measure of it. A
+    # leftover redirect here would silently replace that fallback.
+    check("vanilla's Map.size() ceiling is left alone, not redirected",
+          guard.method("factorygaugeimprove$countAgainstTheGrid", 1) is None,
+          "the old redirect is still in the mixin")
     redirects_on_size = [a for a in redirects(verbose_handler)
                          if unwrap(a["target"]) == MAP_SIZE_DESC]
-    check("and it is anchored on checkForIssues' own Map.size()",
-          len(redirects_on_size) == 1 and "checkForIssues" in unwrap(redirects_on_size[0]["method"]),
+    check("and no redirect is anchored on checkForIssues' Map.size()",
+          not redirects_on_size,
           f"found {len(redirects_on_size)} redirects on Map.size()")
 
     # ---- report ----------------------------------------------------------

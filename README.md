@@ -40,9 +40,11 @@ cells, so a cell never holds a number larger than a stack.
 Since a Create package holds 9 × 64, a gauge can no longer describe an order that a single package
 cannot carry — which is what used to force nine gauges onto one wall.
 
-The limit counts **cells in the grid you are filling**, not arrows leaving a gauge: a gauge that
-feeds nine downstream inputs is not blocked by that, and being pointed at by other gauges never
-costs a gauge a cell of its own.
+The limit counts **cells of the grid the new connection is going into**, and only that: when you
+click one gauge and then another, the connection lands on the one you clicked **first**, so it is
+*that* gauge's own inputs that decide whether there is room. A gauge that feeds nine downstream
+inputs is not blocked by it, and being pointed at by other gauges never costs a gauge a cell of its
+own.
 
 ![Factory gauge in the world, connected to a chain conveyor](screenshots/in-game.png)
 
@@ -66,7 +68,7 @@ close with a big step, fine-tune with ±1.
 ## Installing
 
 1. Install **NeoForge 21.1.x** and **Create 6.0.10** (Fabric is not supported).
-2. Drop `factorygaugeimprove-1.2.1-for-create-6.0.10-neoforge-1.21.1.jar` into `.minecraft/mods`.
+2. Drop `factorygaugeimprove-1.2.2-for-create-6.0.10-neoforge-1.21.1.jar` into `.minecraft/mods`.
 3. Single-player works immediately; on a server only **your own client** needs the mod.
 
 ## Configuration
