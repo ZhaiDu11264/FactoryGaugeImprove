@@ -120,18 +120,11 @@ close with a big step, fine-tune with ±1.
 ```bash
 gradlew.bat build -x test          # jar -> build/libs/
 gradlew.bat checkAmounts           # offline assertions on the amount arithmetic
-python tools/verify_target.py      # checks Create's bytecode + this mod's compiled annotations
 ```
 
 Create, Flywheel and Ponder are `compileOnly` and are not redistributed here — put these three jars
 in `libs/` before building (create-1.21.1-6.0.10, flywheel-neoforge-1.21.1-1.0.6,
 ponder-neoforge-1.0.82+mc1.21.1).
-
-The mod renders its badge (and the icon inside the jar) from vanilla Create assets only:
-
-```bash
-python art/make_badge.py           # -> promo/factory_gauge_icon.png, promo/factory_gauge_banner.png
-```
 
 ## License
 

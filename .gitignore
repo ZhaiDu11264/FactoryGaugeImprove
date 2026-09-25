@@ -23,3 +23,9 @@ docs/
 
 # id of the Modrinth project this repo publishes to
 .modrinth_project_id
+
+# local tooling - used on this machine, kept out of the published repo
+/art/
+/tools/
+/install.bat
+/install.ps1

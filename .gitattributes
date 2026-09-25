@@ -1,0 +1,4 @@
+# Language statistics: this is a Java mod repo. Count Java and only Java -
+# build helpers, lang data and configs are not languages of this project.
+* linguist-detectable=false
+*.java linguist-detectable=true
